@@ -3,7 +3,7 @@
 #include <cmath>
 #include <iostream>
 #include <vector>
-#include <forward_list>
+#include <list>
 
 // Apply the force from neighbor to particle
 void apply_force(particle_t& particle, particle_t& neighbor) {
@@ -55,8 +55,8 @@ static int mybinx_min,mybinx_max; // index of min (included) and max (excluded) 
 static int mybinx_min_g,mybinx_max_g; // index of min (included) and max (excluded) bin row, taking into account ghost bins
 static int binxthresh_up,binxthresh_dn; // index of max bin row held by the processor above the current one, and min bin row held by the processor below
 
-static std::vector<std::vector<std::forward_list<int>>> bins; //bins pertaining to one processor + ghost bins
-static std::vector<std::vector<std::forward_list<int>>> movedparts; //bins pertaining to one processor + ghost bins
+static std::vector<std::vector<std::list<int>>> bins; //bins pertaining to one processor + ghost bins
+static std::vector<std::vector<std::list<int>::iterator>> heads;
 
 static int max_sent_parts;
 static particle_t* send_up; //array of particles to be transferred up
@@ -85,13 +85,15 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
     
     /// Allocate memory for bins in this processor only -- plus ghost bins ///
     for (int ib = mybinx_min_g; ib < mybinx_max_g; ++ib) {
-        std::vector<std::forward_list<int>> row,row2;
+        std::vector<std::list<int>> row;
         bins.push_back(row);
-        movedparts.push_back(row2);
+        std::vector<std::list<int>::iterator> row2;
+        heads.push_back(row2);
         for (int jb = 0; jb < nbinsx; ++jb) {
-            std::forward_list<int> list = {}, list2={};
+            std::list<int> list = {};
             bins[ib-mybinx_min_g].push_back(list);
-            movedparts[ib-mybinx_min_g].push_back(list);
+            std::list<int>::iterator hd = list.begin();
+            heads[ib-mybinx_min_g].push_back(hd);
         }
     }
     
@@ -118,16 +120,17 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
 
 
 
-typedef std::forward_list<int>::iterator IT;
 
 
 void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
     
     ////////////////////////////////////////////////////
-    // Compute Forces -- exlude ghost bins /////////////
+    /////// Compute Forces -- exclude ghost bins ///////
     ////////////////////////////////////////////////////
     for (int ib = mybinx_min; ib < mybinx_max; ++ib) {
         for (int jb = 0; jb < nbinsx; ++jb) {
+            // Keep track of list heads for the next step
+            heads[ib-mybinx_min_g][jb] = bins[ib-mybinx_min_g][jb].begin();
             for (int i : bins[ib-mybinx_min_g][jb]) {
                 parts[i].ax = parts[i].ay = 0;
                 for (int local_i = fmax(0,ib-1); local_i <= fmin(nbinsx-1,ib+1); ++local_i){
@@ -144,24 +147,25 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     std::cout << "rank:" << rank << std::endl;
     MPI_Barrier(MPI_COMM_WORLD);
     
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////
-    // Move Particles & keep track of particles that move out of the scope of this processor
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    ////// Move Particles & keep track of particles that move out of the scope of this processor ///////
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    
+    
+    // Move Particles
     for (int ib = mybinx_min; ib < mybinx_max; ++ib) {
         for (int jb = 0; jb < nbinsx; ++jb) {
-            IT before = bins[ib-mybinx_min_g][jb].before_begin();
-            for ( IT it = bins[ib-mybinx_min_g][jb].begin(); it != bins[ib-mybinx_min_g][jb].end(); ){
+            std::list<int>::iterator it = heads[ib-mybinx_min_g][jb];
+            while (it != bins[ib-mybinx_min_g][jb].end()){
                 int i = *it;
-                std::cout << i << std::endl;
                 move(parts[i], size);
                 int new_ib = (int)(parts[i].x / dxbin);
                 int new_jb = (int)(parts[i].y / dxbin);
                 
                 if (ib != new_ib || jb != new_jb) {
-                    std::cout << "midloop" << std::endl;
-                    it = bins[ib-mybinx_min_g][jb].erase_after( before );//bins[ib-mybinx_min_g][jb].remove(i);
+                    it = bins[ib-mybinx_min_g][jb].erase( it );
                     if ((new_ib >= mybinx_min) && (new_ib < mybinx_max)){
-                        movedparts[new_ib-mybinx_min_g][new_jb].emplace_front(i);
+                        bins[new_ib-mybinx_min_g][new_jb].emplace_front(i);
                     }
                     if (new_ib <= binxthresh_up) { // add to array to be communicated to processor above
                         std::cout << "rank" << rank << " sending part " << i << " up" << std::endl;
@@ -174,26 +178,15 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
                         nparts_dn++;
                     }
                 }
-                std::cout << "1loop" << std::endl;
-                before = it;
-                std::cout << "2loop" << std::endl;
-                ++it;
-                std::cout << "endloop" << std::endl;
+                else{
+                    it ++;
+                }
             }
         }
     }
+    
     std::cout << "rank:" << rank << " | nparts_up:" << nparts_up << " | nparts_dn:" << nparts_dn << " | max_sent_parts:" << max_sent_parts << std::endl;
     MPI_Barrier(MPI_COMM_WORLD);
-    
-    for (int ib = mybinx_min; ib < mybinx_max; ++ib) {
-        for (int jb = 0; jb < nbinsx; ++jb) {
-            for (int i : movedparts[ib-mybinx_min_g][jb]) {
-                bins[ib-mybinx_min_g][jb].emplace_front(i);
-            }
-        }
-    }
-    
-
     
     
     ///////////////////////////////////////////
@@ -230,7 +223,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
         int ib = (int)(recv_above[i].x / dxbin);
         int jb = (int)(recv_above[i].y / dxbin);
         if ((ib >= mybinx_min) && (ib < mybinx_max)){ //this check shouldn't be needed
-            if(i>1000){std::cout << "SHIIIIIIT1"  << std::endl;}
+//            if(i>1000){std::cout << "SHIIIIIIT1"  << std::endl;}
             bins[ib-mybinx_min_g][jb].emplace_front(parti); 
         }
     }
@@ -241,12 +234,12 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
         int ib = (int)(recv_below[i].x / dxbin);
         int jb = (int)(recv_below[i].y / dxbin);
         if ((ib >= mybinx_min) && (ib < mybinx_max)){ //this check shouldn't be needed
-            if(i>1000){std::cout << "SHIIIIII2"  << std::endl;}
+//            if(i>1000){std::cout << "SHIIIIII2"  << std::endl;}
             bins[ib-mybinx_min_g][jb].emplace_front(parti); 
         }        
     }
     
-    
+/*    
     ///////////////////////////////////////////
     // Communicate ghost bins -- again, send down & receive from above, then send up and receive from below
     ///////////////////////////////////////////
@@ -302,44 +295,34 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
         int jb = (int)(recv_above[i].y / dxbin);
 //        if ((ib >= mybinx_min_g) && (ib < mybinx_max_g)){ //this check shouldn't be needed
         if (ib == mybinx_min_g){
-            if(i>1000){std::cout << "SHIIIIIIT3"  << std::endl;}
+//            if(i>1000){std::cout << "SHIIIIIIT3"  << std::endl;}
             bins[0][jb].emplace_front(parti); 
         }
-        else{
-            std::cout << "shit " << ib -mybinx_min_g << std::endl;
-        }
+//        else{
+//            std::cout << "shit " << ib -mybinx_min_g << std::endl;
+//        }
     }
     
     for (int i = 0; i < nparts_below; ++i){
         int parti = recv_below[i].id-1; // For some reason the ids are defined as i+1 in main.cpp
-        if (parti > 1000){std::cout << "SHITTTTT parti " <<std::endl;}
+//        if (parti > 1000){std::cout << "SHITTTTT parti " <<std::endl;}
         parts[parti] = recv_below[i];
         int ib = (int)(recv_below[i].x / dxbin);
         int jb = (int)(recv_below[i].y / dxbin);
 //        if ((ib >= mybinx_min_g) && (ib < mybinx_max_g)){ //this check shouldn't be needed
         if ((ib == mybinx_max_g-1)){
-            if(i>1000){std::cout << "SHIIIIIIT4"  << std::endl;}
+//            if(i>1000){std::cout << "SHIIIIIIT4"  << std::endl;}
             bins[ib-mybinx_min_g][jb].emplace_front(parti); 
         }      
-        else{
-            std::cout << "shit " << ib-mybinx_max_g-1 << std::endl;
-        }
+//        else{
+//            std::cout << "shit " << ib-mybinx_max_g-1 << std::endl;
+//        }
     }   
-    
+    */
     // Prepare for next step - no need to actually empty the buffers that get sent, just reset their counters to 0
     nparts_up = 0;
     nparts_dn = 0;    
     MPI_Barrier(MPI_COMM_WORLD);
-    
-    
-    
-    for (int ib = mybinx_min; ib < mybinx_max; ++ib) {
-        for (int jb = 0; jb < nbinsx; ++jb) {
-            for (int i : bins[ib-mybinx_min_g][jb]) {
-                if(i>1000){std::cout << "SHIIIIIITEND"  << std::endl;}
-            }
-        }
-    }
     
     
 }
@@ -348,7 +331,7 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
     // Write this function such that at the end of it, the master (rank == 0)
     // processor has an in-order view of all particles. That is, the array
     // parts is complete and sorted by particle id.
-    
+nparts_up=0;
     for (int ib = mybinx_min; ib < mybinx_max; ++ib) {
         for (int jb = 0; jb < nbinsx; ++jb) {
             for (int i : bins[ib-mybinx_min_g][jb]) {
@@ -358,8 +341,11 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
         }
     }
     
+    std::cout << "rank:" << rank << " | nparts_up:" << nparts_up << std::endl;
+    
     int recvcounts[num_procs];
     MPI_Gather(&nparts_up, 1, MPI_INT, recvcounts, num_procs, MPI_INT, 0,MPI_COMM_WORLD);
+    if(rank==0){std::cout << "a"<< recvcounts[0] <<"b"<< recvcounts[1] << std::endl;}
     
     int displacements[num_procs];
     displacements[0]=0;
