@@ -331,7 +331,7 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
     // Write this function such that at the end of it, the master (rank == 0)
     // processor has an in-order view of all particles. That is, the array
     // parts is complete and sorted by particle id.
-nparts_up=0;
+    nparts_up=0;
     for (int ib = mybinx_min; ib < mybinx_max; ++ib) {
         for (int jb = 0; jb < nbinsx; ++jb) {
             for (int i : bins[ib-mybinx_min_g][jb]) {
@@ -340,12 +340,8 @@ nparts_up=0;
             }
         }
     }
-    
-    std::cout << "rank:" << rank << " | nparts_up:" << nparts_up << std::endl;
-    
     int recvcounts[num_procs];
-    MPI_Gather(&nparts_up, 1, MPI_INT, recvcounts, num_procs, MPI_INT, 0,MPI_COMM_WORLD);
-    if(rank==0){std::cout << "a"<< recvcounts[0] <<"b"<< recvcounts[1] << std::endl;}
+    MPI_Gather(&nparts_up, 1, MPI_INT, recvcounts, 1, MPI_INT, 0,MPI_COMM_WORLD);
     
     int displacements[num_procs];
     displacements[0]=0;
