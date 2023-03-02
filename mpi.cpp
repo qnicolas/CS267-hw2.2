@@ -123,7 +123,6 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
 
 
 void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
-    
     ////////////////////////////////////////////////////
     /////// Compute Forces -- exclude ghost bins ///////
     ////////////////////////////////////////////////////
@@ -348,12 +347,11 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
     for (int p=1; p<num_procs;++p){
         displacements[p] = displacements[p-1] + recvcounts[p-1];
     }
-    
     particle_t recv_buf[num_parts];
     MPI_Gatherv(send_up, nparts_up, PARTICLE, recv_buf, recvcounts,displacements, PARTICLE, 0,MPI_COMM_WORLD);
-    
-    // Do stuff with recvbuf
-    for (int i=0; i<num_parts;++i){
-        parts[recv_buf[i].id-1] = recv_buf[i];
-    }    
+    if (rank==0){    
+        for (int i=0; i<num_parts;++i){
+            parts[recv_buf[i].id-1] = recv_buf[i];
+        }    
+    }
 }
