@@ -152,7 +152,7 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
         }
     }
     
-    max_sent_parts = 2*num_parts/num_procs_eff; // Heuristic for the maximum number of particles sent from one rank to another
+    max_sent_parts = 3*num_parts/num_procs_eff; // Heuristic for the maximum number of particles sent from one rank to another
     send_up = new particle_t[max_sent_parts] ; // buffers used to send particles between ranks
     send_dn = new particle_t[max_sent_parts] ; // buffers used to send particles between ranks
     nparts_up = 0;
@@ -565,7 +565,7 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
             }
         }
     }
-    
+
     // Gather number of particles that will get sent at the next step (for MPI_Gatherv)
     int recvcounts[num_procs];
     MPI_Gather(&nparts_up, 1, MPI_INT, recvcounts, 1, MPI_INT, 0,MPI_COMM_WORLD);
@@ -577,7 +577,7 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
         displacements[p] = displacements[p-1] + recvcounts[p-1];
     }
     int tot_size = displacements[num_procs-1] + recvcounts[num_procs-1]; // should be == num_parts
-    
+
     // Gatherv all the particles to rank 0
     particle_t recv_buf[num_parts];
     MPI_Gatherv(send_up, nparts_up, PARTICLE, recv_buf, recvcounts,displacements, PARTICLE, 0,MPI_COMM_WORLD);
@@ -591,5 +591,4 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
     
     // Reset the send_up buffer counter to 0
     nparts_up = 0;
-
 }
