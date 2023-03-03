@@ -152,7 +152,12 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
         }
     }
     
-    max_sent_parts = 3*num_parts/num_procs_eff; // Heuristic for the maximum number of particles sent from one rank to another
+    if (num_parts < 10000){
+        max_sent_parts = 3*num_parts/num_procs_eff; // Heuristic for the maximum number of particles sent from one rank to another
+    }
+    else{
+        max_sent_parts = 2*num_parts/num_procs_eff; // Heuristic for the maximum number of particles sent from one rank to another
+    }
     send_up = new particle_t[max_sent_parts] ; // buffers used to send particles between ranks
     send_dn = new particle_t[max_sent_parts] ; // buffers used to send particles between ranks
     nparts_up = 0;
